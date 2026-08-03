@@ -3,7 +3,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 from langchain_groq import ChatGroq
-from langchain_core.messages import BaseMessage,HumanMessage
+from langchain_core.messages import BaseMessage,HumanMessage, SystemMessage, AIMessage
 from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun, WikipediaQueryRun
 from langchain_community.utilities import WikipediaAPIWrapper
@@ -17,7 +17,7 @@ import requests
 
 load_dotenv()
 
-llm = ChatGroq(model="llama-3.3-70b-versatile")
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
 # postgres connection.
 DB_URL = os.environ["DATABASE_URL"]
@@ -51,6 +51,7 @@ def get_stock_price(symbol: str) -> dict:
     return r.json()
 
 # 3. weather 
+@tool
 def get_weather(city: str) -> dict:
 
     """Get the current real weather for a specific city. Use this whenever
@@ -81,22 +82,70 @@ def get_weather(city: str) -> dict:
     except Exception as e:
         return {"error": e}
 
-# 3. date time 
+# 4. date time 
 @tool 
 def get_current_datetime() -> dict:
     """Get the current date and time. Use this whenever the question depends
     on 'today', 'now', or the current date — never guess dates from memory."""
     return {"current datetime":datetime.now().strftime("%A, %d %B %Y, %I:%M %p")}
 
-# 4. python REPL - Executes Python code dynamically to perform calculations and data analysis.
-python_repl_tool = PythonREPLTool()
+# 5. python REPL - Executes Python code dynamically to perform calculations and data analysis.
+python_repl = PythonREPLTool()
+@tool
+def python_repl_tool(code: str) -> str:
+    """
+    Execute Python code for calculations, data analysis, and programming tasks.
 
-# 5. wikipedia
-wikipedia_tool = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+    Use this tool ONLY when computation is required.
+    Never use this tool to obtain live information such as:
+    - Weather
+    - Currency exchange rates
+    - Stock prices
+    - News
+    - Current date or time
+
+    For live information, always use the appropriate dedicated tool.
+    """
+    return python_repl.run(code)
+
+# 6. wikipedia
+@tool
+def wikipedia_tool(query:str) -> str:
+    """
+    Search Wikipedia for established facts, historical or encyclopedic
+    information. Use this for general knowledge questions about people,
+    places, events, or concepts.
+    """
+    try:
+        wiki = WikipediaAPIWrapper()
+        result = wiki.run(query)
+        if not result or not result.strip():
+            return f"No Wikipedia results found for '{query}'."
+        return result
+    except Exception as e:
+        return f"Wikipedia search failed (try rephrasing the query): {e}"
+
+# 7. exchange rate. (eg, USD to INR)
+@tool
+def get_exchange_rate(from_currency: str, to_currency: str) -> str:
+    """Get the LIVE exchange rate between two currencies.
+
+    Use this tool ONLY for currency conversion or exchange rates.
+    Never use Python or web search instead."""
+    try:
+        url = "https://api.frankfurter.app/latest"
+        params = {"from": from_currency.upper(), "to": to_currency.upper()}
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        rate = data["rates"][to_currency.upper()]
+        return f"1 {from_currency.upper()} = {rate} {to_currency.upper()} (as of {data['date']})"
+    except Exception as e:
+        return f"Exchange rate error: {e}"
 
 
 # make LLM tools aware...
-tools = [search_tool, wikipedia_tool, get_stock_price, get_current_datetime, get_weather]
+tools = [search_tool, wikipedia_tool, python_repl_tool,get_stock_price, get_current_datetime, get_weather,get_exchange_rate]
 llm_with_tools = llm.bind_tools(tools)
 
 # ====================================== Chat Bot backend ======================================
@@ -104,12 +153,33 @@ llm_with_tools = llm.bind_tools(tools)
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
+SYSTEM_PROMPT = SystemMessage(content=(
+    "You are a helpful assistant with access to tools: web search, wikipedia, "
+    "stock price, weather, currency exchange rate, current date/time, and "
+    "python for calculations. Answer general knowledge questions directly, "
+    "in plain text — do NOT call a tool unless the question genuinely needs "
+    "live/external/computed data.\n\n"
+    "For ANY numeric fact that can change over time (prices, exchange rates, "
+    "weather, stock values) — always call the relevant tool. Never guess, "
+    "estimate, or recall such numbers from memory.\n\n"
+    "When you need multiple tools to answer one question (e.g. converting a "
+    "price to another currency), call them silently and give ONLY the final "
+    "answer. Do NOT narrate your plan or steps out loud — never write things "
+    "like 'first I will...', 'let me get...', or 'now I will calculate...'. "
+    "The user should only see the final, direct answer.\n\n"
+    "When a tool returns a result, NEVER show raw JSON or dict output to the "
+    "user — always summarize it in a natural, clear sentence."
+))
+
 def chat_node(state: ChatState):
     messages = state['messages']
+
+    full_message = [SYSTEM_PROMPT] + messages
     try:
-        response = llm_with_tools.invoke(messages)
+        response = llm_with_tools.invoke(full_message)
     except Exception as e:
-        return {"error":e}
+        print(f"chat_node error: {e}")   # shows the REAL cause in your terminal
+        response = AIMessage(content=f"Something went wrong on my end: {e}")
     return {"messages": [response]}
 
 tools_node = ToolNode(tools=tools)
