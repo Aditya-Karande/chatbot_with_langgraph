@@ -5,3 +5,7 @@ dotenv
 streamlit
 langgraph-checkpoint-postgres
 psycopg[binary,pool]
+langchain_community
+ddgs
+langchain_experimental
+wikipedia
