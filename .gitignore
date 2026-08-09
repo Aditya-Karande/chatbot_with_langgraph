@@ -11,14 +11,15 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# notes
+notes/
+.notes/
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
 # VS Code
 .vscode/
-
-# macOS
-.DS_Store
 
 # Windows
 Thumbs.db
