@@ -8,6 +8,7 @@ from backend.state import ChatState
 from backend.summarization import summarize_node
 from backend.tools import tools
 
+# graph
 graph = StateGraph(ChatState)
 
 graph.add_node("load_memory",load_memory_node)
