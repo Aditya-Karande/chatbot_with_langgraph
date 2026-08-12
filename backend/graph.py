@@ -11,6 +11,7 @@ from backend.tools import tools
 # graph
 graph = StateGraph(ChatState)
 
+# nodes
 graph.add_node("load_memory",load_memory_node)
 graph.add_node("chat_node",chat_node)
 graph.add_node("tools",ToolNode(tools=tools))
@@ -18,10 +19,11 @@ graph.add_node("hitl_gate",hitl_gate)
 graph.add_node("save_memory",save_memory_node)
 graph.add_node("summarize",summarize_node)
 
+# edges
 graph.add_edge(START,"load_memory")
 graph.add_edge("load_memory","chat_node")
 graph.add_conditional_edges(
-    "chat_node",
+    "chat_node", 
     route_after_agent,
     {"tools":"tools","hitl_gate":"hitl_gate","save_memory":"save_memory"},
     )
